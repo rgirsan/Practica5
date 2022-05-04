@@ -1,0 +1,161 @@
+---
+title: 'XAI 3: Model-Agnostic methods. Minerva Cabria y Raquel Gironés'
+output:
+  html_document:
+    df_print: paged
+---
+
+## EXERCISE:
+
+Apply PDP to the regression example of predicting bike rentals. Fit a random forest approximation for the prediction of bike rentals (**cnt**). Use the partial dependence plot to visualize the relationships the model learned. Use the slides shown in class as model.  
+
+## QUESTION:
+
+Analyse the influence of **days since 2011, temperature, humidity** and **wind speed** on the predicted bike counts.
+
+```{r, warning=FALSE}
+library(dplyr)
+library(plotly)
+library(reshape2)
+library(lubridate)
+library(randomForestSRC)
+library(pdp)
+
+days <- read.csv("day.csv")
+hour <- read.csv("hour.csv")
+
+days$dteday <- as_date(days$dteday)
+days_since <- select(days, workingday, holiday, temp, hum, windspeed, cnt)
+days_since$days_since_2011 <- int_length(interval(ymd("2011-01-01"), days$dteday)) / (3600*24)
+days_since$SUMMER <- ifelse(days$season == 3, 1, 0)
+days_since$FALL <- ifelse(days$season == 4, 1, 0)
+days_since$WINTER <- ifelse(days$season == 1, 1, 0)
+days_since$MISTY <- ifelse(days$weathersit == 2, 1, 0)
+days_since$RAIN <- ifelse(days$weathersit == 3 | days$weathersit == 4, 1, 0)
+days_since$temp <- days_since$temp * 47 - 8
+days_since$hum <- days_since$hum * 100
+days_since$windspeed <- days_since$windspeed * 67
+
+rf <- rfsrc(cnt~., data=days_since)
+
+results <- select(days_since, days_since_2011, temp, hum, windspeed, cnt)
+nr <- nrow(days_since)
+for(c in names(results)[1:4])
+{
+  for(i in 1:nr){
+    r <- days_since
+    r[[c]] <- days_since[[c]][i]
+    sal <- predict(rf, r)$predicted
+    results[[c]][i] <- sum(sal) / nr
+  }
+}
+```
+
+```{r}
+p1 <- ggplot(days_since, aes(x=days_since_2011, y=results$days_since_2011))+geom_line()+geom_rug(sides="b", alpha=0.1)+ylim(0,6000)+ xlab('Days since 2011') 
+p2 <- ggplot(days_since, aes(x=temp, y=results$temp))+geom_line()+geom_rug(sides="b", alpha=0.1)+ylim(0,6000)+xlab('Temperature')
+p3 <- ggplot(days_since, aes(x=hum, y=results$hum))+geom_line()+geom_rug(sides="b", alpha=0.1)+ylim(0,6000)+xlab('Humidity')
+p4 <- ggplot(days_since, aes(x=windspeed, y=results$windspeed))+geom_line()+geom_rug(sides="b", alpha=0.1)+ylim(0,6000)+xlab('Wind speed')
+subplot(p1, p2, p3, p4)
+```
+En el primer gráfico observamos la influencia que tiene la variable days_since_2011 sobre el alquiler de bicicletas, que es nuestra variable a predecir. De este gráfico podemos concluir que conforme pasa el tiempo se alquilan más bicis, hasta que llega un punto (día 650 más o menos) en el que disminuye. 
+
+En el segundo de estos podemos ver como influye la variable temperatura, y los resultados son similares a los anteriores, vemos que la distribución de dicha variable es creciente hasta que llega una temperatura (aproximadamente 24 grados) en la que la probabilidad del alquiler de bicis comienza a disminuir. 
+
+Ambas variables presentan una correlación positiva con la variable respuesta, hasta que llega un punto en el que la tendencia cambia decrecientemente.
+
+En las dos variables restantes ocurre lo contrario, podemos ver claramente una correlación negativa, dónde si estas variables aumentan (humedad y velocidad del viento), el alquiler de bicicletas disminuye. Resultados bastante coherentes ya que con un mal clima es probable que las personas no realicen pasatiempos/actividades con bicileta. 
+
+## EXERCISE:
+
+Generate a 2D Partial Dependency Plot with humidity and temperature to predict the number of bikes rented depending of those parameters.
+
+BE CAREFUL: due to the size, extract a set of random samples from the BBDD before generating the the data for the Partial Dependency Plot. 
+
+Show the density distribution of both input features with the 2D plot as shown in the class slides. 
+
+TIP: Use geom_tile() to generate the 2D plot. Set width and height to avoid holes. 
+
+## QUESTION:
+
+Interpret the results.
+
+```{r}
+
+sampled <- sample_n(days_since, 40)
+temp <- sampled$temp
+hum <- sampled$hum
+th <- inner_join(data.frame(temp),data.frame(hum), by=character())
+th$p <- 0
+
+for(i in 1:nrow(th)){
+  r <- days_since
+  r[["temp"]] <- th[["temp"]][i]
+  r[["hum"]] <- th[["hum"]][i]
+  
+  sal <- predict(rf, r)$predicted
+  th[["p"]][i] <- sum(sal) / nr
+}
+
+```
+
+```{r}
+pd <- ggplot(th, aes(x = temp, y = hum, fill = p)) +
+  geom_tile(width=40, height=40) + labs(x='Temperature', y='Humidity') +  guides(fill = guide_colourbar(title = "Number of bikes"))
+pd
+```
+Con el mapa de calor obtenido, podemos reafirmar los resultados de los gráficos anteriores. 
+
+En cuanto a la variable temperatura, podemos decir que a medida que aumenta ésta, también lo hará el número de bicis alquilado. Es decir, el alquiler de biciletas aumenta si también lo hace la temperatura. (Asociación positiva)
+
+Sin embargo, con la humedad ocurre lo contrario, entre ellas existe una asociación negativa ya que si la humedad aumenta, el alquiler de biciletas disminuye. 
+
+## EXERCISE:
+
+Apply the previous concepts to predict the **price** of a house from the database **kc_house_data.csv**. In this case, use again a random forest approximation for the prediction based on the features **bedrooms**, **bathrooms**, **sqft_living**, **sqft_lot**, **floors** and **yr_built**. 
+Use the partial dependence plot to visualize the relationships the model learned.
+
+BE CAREFUL: due to the size, extract a set of random samples from the BBDD before generating the data for the Partial Dependency Plot. 
+
+## QUESTION:
+
+Analyse the influence of **bedrooms, bathrooms, sqft_living** and **floors** on the predicted price.
+
+```{r}
+
+d <- read.csv("kc_house_data.csv")
+
+sampled <- sample_n(d, 1000)
+
+sampled <- select(sampled, bedrooms, bathrooms, sqft_living, sqft_lot, floors, yr_built, price)
+
+rf <- rfsrc(price~., data=sampled)
+
+results <- select(sampled, bedrooms, bathrooms, sqft_living, floors, price)
+nr <- nrow(sampled)
+for(c in names(results)[1:4])
+{
+  for(i in 1:nr){
+    r <- sampled
+    r[[c]] <- sampled[[c]][i]
+    sal <- predict(rf, r)$predicted
+    results[[c]][i] <- sum(sal) / nr
+  }
+}
+
+```
+
+```{r}
+p1 <- ggplot(sampled, aes(x=bedrooms, y=results$bedrooms))+geom_line()+geom_rug(sides="b", alpha=0.1)+ xlab('Bedrooms') 
+p2 <- ggplot(sampled, aes(x=bathrooms, y=results$bathrooms))+geom_line()+geom_rug(sides="b", alpha=0.1)+xlab('Bathrooms')
+p3 <- ggplot(sampled, aes(x=sqft_living, y=results$sqft_living))+geom_line()+geom_rug(sides="b", alpha=0.1)+xlab('Sqft Living')
+p4 <- ggplot(sampled, aes(x=floors, y=results$floors))+geom_line()+geom_rug(sides="b", alpha=0.1)+xlab('Floors')
+subplot(p1, p2, p3, p4)
+```
+Ahora vamos a estudiar la influencia de estas cuatro variables sobre el precio de una casa.
+
+En primer lugar, podemos ver que el número de habitaciones hace que disminuya el precio si está entre 1 y 5 habitaciones. Pero, cuando las habitaciones son de 6 para arriba, este precio se dispara, como cabe esperar.
+
+Con el número de baños podemos observar una distribución totalmente creciente, a medida que el número de baños aumenta, también lo hace el precio. Lo mismo ocurre con los metros cuadrados de la vivienda. Ambas tienen una asociación positiva con el precio.  
+
+Por último, la distribución del número de plantas es un poco distinta, vemos que el precio aumenta si el número de plantas está entre 1 y 1.5, pero disminuye hasta llegar a 2. En el siguiente tramo, correspondiente a una vivienda con 2 o 3 plantas, vemos que el precio crece. Por tanto, no podemos concluir si la relación de esta variable con el precio es positiva o negativa, ya que va variando.
