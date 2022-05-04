@@ -1,0 +1,68 @@
+---
+title: 'XAI 3: Model-Agnostic methods. Minerva Cabria y Raquel Gironés'
+output:
+  html_document:
+    df_print: paged
+---
+
+## EXERCISE:
+
+Apply PDP to the regression example of predicting bike rentals. Fit a random forest approximation for the prediction of bike rentals (**cnt**). Use the partial dependence plot to visualize the relationships the model learned. Use the slides shown in class as model.  
+
+## QUESTION:
+
+Analyse the influence of **days since 2011, temperature, humidity** and **wind speed** on the predicted bike counts.
+
+```{r, warning=FALSE}
+library(dplyr)
+library(plotly)
+library(reshape2)
+library(lubridate)
+library(randomForestSRC)
+library(pdp)
+
+days <- read.csv("day.csv")
+hour <- read.csv("hour.csv")
+
+days$dteday <- as_date(days$dteday)
+days_since <- select(days, workingday, holiday, temp, hum, windspeed, cnt)
+days_since$days_since_2011 <- int_length(interval(ymd("2011-01-01"), days$dteday)) / (3600*24)
+days_since$SUMMER <- ifelse(days$season == 3, 1, 0)
+days_since$FALL <- ifelse(days$season == 4, 1, 0)
+days_since$WINTER <- ifelse(days$season == 1, 1, 0)
+days_since$MISTY <- ifelse(days$weathersit == 2, 1, 0)
+days_since$RAIN <- ifelse(days$weathersit == 3 | days$weathersit == 4, 1, 0)
+days_since$temp <- days_since$temp * 47 - 8
+days_since$hum <- days_since$hum * 100
+days_since$windspeed <- days_since$windspeed * 67
+
+rf <- rfsrc(cnt~., data=days_since)
+
+results <- select(days_since, days_since_2011, temp, hum, windspeed, cnt)
+nr <- nrow(days_since)
+for(c in names(results)[1:4])
+{
+  for(i in 1:nr){
+    r <- days_since
+    r[[c]] <- days_since[[c]][i]
+    sal <- predict(rf, r)$predicted
+    results[[c]][i] <- sum(sal) / nr
+  }
+}
+```
+
+```{r}
+p1 <- ggplot(days_since, aes(x=days_since_2011, y=results$days_since_2011))+geom_line()+geom_rug(sides="b", alpha=0.1)+ylim(0,6000)+ xlab('Days since 2011') 
+p2 <- ggplot(days_since, aes(x=temp, y=results$temp))+geom_line()+geom_rug(sides="b", alpha=0.1)+ylim(0,6000)+xlab('Temperature')
+p3 <- ggplot(days_since, aes(x=hum, y=results$hum))+geom_line()+geom_rug(sides="b", alpha=0.1)+ylim(0,6000)+xlab('Humidity')
+p4 <- ggplot(days_since, aes(x=windspeed, y=results$windspeed))+geom_line()+geom_rug(sides="b", alpha=0.1)+ylim(0,6000)+xlab('Wind speed')
+subplot(p1, p2, p3, p4)
+```
+En el primer gráfico observamos la influencia que tiene la variable days_since_2011 sobre el alquiler de bicicletas, que es nuestra variable a predecir. De este gráfico podemos concluir que conforme pasa el tiempo se alquilan más bicis, hasta que llega un punto (día 650 más o menos) en el que disminuye. 
+
+En el segundo de estos podemos ver como influye la variable temperatura, y los resultados son similares a los anteriores, vemos que la distribución de dicha variable es creciente hasta que llega una temperatura (aproximadamente 24 grados) en la que la probabilidad del alquiler de bicis comienza a disminuir. 
+
+Ambas variables presentan una correlación positiva con la variable respuesta, hasta que llega un punto en el que la tendencia cambia decrecientemente.
+
+En las dos variables restantes ocurre lo contrario, podemos ver claramente una correlación negativa, dónde si estas variables aumentan (humedad y velocidad del viento), el alquiler de bicicletas disminuye. Resultados bastante coherentes ya que con un mal clima es probable que las personas no realicen pasatiempos/actividades con bicileta. 
+
